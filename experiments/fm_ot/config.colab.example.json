@@ -1,0 +1,48 @@
+{
+  "python_bin": "python",
+  "project_root": "/content/AE_OT",
+  "output_root": "/content/AE_OT/experiments/fm_ot/runs/celeba_fm_vs_ot",
+  "budgets": [512, 1024],
+  "seeds": [0],
+  "world_size": 1,
+  "evaluation": {
+    "real_eval_dir": "/content/data/celeba/testing",
+    "generated_eval_samples": 5000,
+    "device": "cuda",
+    "batch_size": 64,
+    "num_workers": 0,
+    "compute_kid": true,
+    "kid_subsets": 10,
+    "kid_subset_size": 500,
+    "compute_pr": false
+  },
+  "fm": {
+    "dataset": "imagenet",
+    "data_path": "/content/data/celeba_imagefolder/train",
+    "epochs": 20,
+    "eval_frequency": 20,
+    "lr": 0.0001,
+    "class_drop_prob": 1.0,
+    "cfg_scale": 0.0,
+    "ode_method": "midpoint",
+    "ode_step_size": 0.02,
+    "num_workers": 2,
+    "max_batch_size": 64,
+    "compute_fid_during_train": false,
+    "use_ema": false
+  },
+  "ot": {
+    "data_root_train": "/content/data/celeba/training",
+    "data_root_test": "/content/data/celeba/testing",
+    "actions": [
+      "extract_feature",
+      "train_ot",
+      "generate_feature",
+      "decode_feature"
+    ],
+    "max_iter": 1000,
+    "lr": 0.05,
+    "num_gen_x": 10000,
+    "max_bat_size_n": 512
+  }
+}
