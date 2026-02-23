@@ -65,10 +65,14 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler, lr_schedule):
                 checkpoint = torch.load(args.resume, map_location="cpu")
         model_without_ddp.load_state_dict(checkpoint["model"])
         print("Resume checkpoint %s" % args.resume)
+        is_eval_mode = (
+            (hasattr(args, "eval") and args.eval)
+            or (hasattr(args, "eval_only") and args.eval_only)
+        )
         if (
             "optimizer" in checkpoint
             and "epoch" in checkpoint
-            and not (hasattr(args, "eval") and args.eval)
+            and not is_eval_mode
         ):
             optimizer.load_state_dict(checkpoint["optimizer"])
             lr_schedule.load_state_dict(checkpoint["lr_schedule"])
