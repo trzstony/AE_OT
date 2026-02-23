@@ -149,12 +149,27 @@ if __name__ == "__main__":
     parser.add_argument("--ot_num_gen_x", help="number of OT latent samples to propose before filtering", type=int, default=20000)
     parser.add_argument("--seed", help="random seed for reproducibility", type=int, default=0)
     parser.add_argument("--result_root", help="root directory for training/generation outputs", type=str, default='./results')
+    parser.add_argument("--num_workers", help="DataLoader workers", type=int, default=4)
+    parser.add_argument("--image_size", help="final image size", type=int, default=64)
+    parser.add_argument("--center_crop_size", help="center crop size before resize", type=int, default=178)
+    parser.add_argument("--ae_num_epochs", help="AE training epochs", type=int, default=500)
+    parser.add_argument("--ae_batch_size", help="AE batch size", type=int, default=512)
+    parser.add_argument("--ae_learning_rate", help="AE learning rate", type=float, default=2e-5)
+    parser.add_argument("--ae_dim_z", help="AE latent dimension", type=int, default=100)
+    parser.add_argument("--ae_dim_f", help="AE base feature count", type=int, default=80)
+    parser.add_argument("--ae_l1_lambda", help="AE latent L1 weight", type=float, default=1e-5)
+    parser.add_argument("--ot_max_gen_samples", help="maximum OT samples after filtering", type=int, default=50000)
+    parser.add_argument("--ot_angle_threshold", help="OT angle threshold", type=float, default=0.7)
+    parser.add_argument("--ot_rec_gen_distance", help="OT interpolation dissimilarity", type=float, default=0.75)
+    parser.add_argument("--decode_num_images", help="number of generated images to decode/save", type=int, default=50000)
+    parser.add_argument("--device", help="compute device", type=str, default="cuda")
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
+    device = torch.device(args.device if args.device == "cuda" and torch.cuda.is_available() else "cpu")
 
     if args.actions is None:
         actions = ['train_ae', 'refine_ae', 'extract_feature', 'train_ot', 'generate_feature', 'decode_feature']
@@ -163,20 +178,20 @@ if __name__ == "__main__":
 
     '''Training args'''
     RESUME = True #toggles of whether to resume training
-    num_epochs = 500 #max number of epochs for AE to train
-    batch_size = 512 #batch size of AE training
-    learning_rate = 2e-5 #learning rate of AE training
-    dim_z = 100 #latent space dimension
+    num_epochs = args.ae_num_epochs #max number of epochs for AE to train
+    batch_size = args.ae_batch_size #batch size of AE training
+    learning_rate = args.ae_learning_rate #learning rate of AE training
+    dim_z = args.ae_dim_z #latent space dimension
     dim_c = 3 #input image number of channels
-    dim_f = 80 #number of features in first layer of AE
-    lmda = 1e-5 #loss weight
+    dim_f = args.ae_dim_f #number of features in first layer of AE
+    lmda = args.ae_l1_lambda #loss weight
     data_path = args.data_root_train #path to your training data folder (for AE)
     test_path = args.data_root_test #path to your testing data folder (for AE)
 
     '''Generation args'''
-    max_gen_samples = 50000 #max number of generated samples. Used to avoid out of memory error.
-    angle_threshold = 0.7 #angle threshold of OT generator ranging from [0,1]. See paper for details.
-    rec_gen_distance = 0.75 #dis-similarity between reconstructed samples and generated samples, ranging from [0,1] with smaller meaning more similar
+    max_gen_samples = args.ot_max_gen_samples #max number of generated samples. Used to avoid out of memory error.
+    angle_threshold = args.ot_angle_threshold #angle threshold of OT generator ranging from [0,1]. See paper for details.
+    rec_gen_distance = args.ot_rec_gen_distance #dis-similarity between reconstructed samples and generated samples, ranging from [0,1] with smaller meaning more similar
     
     '''Create directories'''
     result_root_path = args.result_root #root directory of training and generating results
@@ -202,15 +217,17 @@ if __name__ == "__main__":
     '''Start training and/or generating'''
     for action in actions:           
         img_transform = transforms.Compose([
+            transforms.CenterCrop(args.center_crop_size),
+            transforms.Resize((args.image_size, args.image_size)),
             transforms.ToTensor(),
         ])
         dataset = P_loader.P_loader(root=data_path,transform=img_transform)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=args.num_workers)
 
         testset = P_loader.P_loader(root=test_path,transform=img_transform)
-        testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=4)
+        testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=args.num_workers)
     
-        model = autoencoder(dim_z, dim_c, dim_f).cuda()
+        model = autoencoder(dim_z, dim_c, dim_f).to(device)
 
         if action == 'train_ae':
             for test_data in testloader:
@@ -219,7 +236,7 @@ if __name__ == "__main__":
             if RESUME:
                 for file in os.listdir(model_path):
                     if fnmatch.fnmatch(file, 'Epoch_*_sim_autoencoder*.pth'):
-                        model.load_state_dict(torch.load(os.path.join(model_path, file)))
+                        model.load_state_dict(torch.load(os.path.join(model_path, file), map_location=device))
 
             criterion = nn.MSELoss()
             optimizer = torch.optim.Adam(
@@ -234,7 +251,7 @@ if __name__ == "__main__":
                 loss_test = 0.0
                 for data in dataloader:
                     img, _, _ = data
-                    img = Variable(img).cuda()
+                    img = Variable(img).to(device)
                     # ===================forward=====================
                     output, z = model(img)
                     loss1 = criterion(output, img)
@@ -252,7 +269,7 @@ if __name__ == "__main__":
 
                 for data in testloader:
                     img, _, _ = data
-                    img = Variable(img).cuda()
+                    img = Variable(img).to(device)
                     output, _ = model(img)
                     loss = criterion(output, img)
                     loss_test += loss.item()
@@ -260,7 +277,7 @@ if __name__ == "__main__":
 
                 loss_train /= count_train
                 loss_test /= count_test
-                out, _ = model(test_img.cuda())
+                out, _ = model(test_img.to(device))
                 pic = out.data.cpu()
                 save_image(pic[:64], os.path.join(img_save_path, 'Epoch_{}_test_image_{:04f}_{:04f}.png'.format(epoch, loss_train, loss_test)))
 
@@ -271,7 +288,7 @@ if __name__ == "__main__":
                 model_load_path = model_path
             for file in os.listdir(model_load_path):
                 if fnmatch.fnmatch(file, 'Epoch_*_sim_autoencoder*.pth'):
-                    model.load_state_dict(torch.load(os.path.join(model_load_path, file)))
+                    model.load_state_dict(torch.load(os.path.join(model_load_path, file), map_location=device))
 
         if action == 'refine_ae':
             for param in model.block1.parameters():
@@ -291,7 +308,7 @@ if __name__ == "__main__":
             if RESUME:
                 for file in os.listdir(model_path):
                     if fnmatch.fnmatch(file, 'Epoch_*_sim_autoencoder*.pth'):
-                        model.load_state_dict(torch.load(os.path.join(model_path, file)))
+                        model.load_state_dict(torch.load(os.path.join(model_path, file), map_location=device))
 
             criterion = nn.MSELoss()
             optimizer = torch.optim.Adam(
@@ -306,7 +323,7 @@ if __name__ == "__main__":
                 loss_test = 0.0
                 for data in dataloader:
                     img, _, _ = data
-                    img = Variable(img).cuda()
+                    img = Variable(img).to(device)
                     # ===================forward=====================
                     output, z = model(img)
                     loss = criterion(output, img)
@@ -333,7 +350,7 @@ if __name__ == "__main__":
                 loss_train /= count_train
                 # loss_test /= count_test
                 loss_test = 0
-                out, _ = model(test_img.cuda())
+                out, _ = model(test_img.to(device))
                 pic = out.data.cpu()
                 save_image(pic[:64], os.path.join(img_save_path, 'Epoch_{}_test_image_{:04f}_{:04f}.png'.format(epoch, loss_train, loss_test)))
 
@@ -344,16 +361,22 @@ if __name__ == "__main__":
                 model_load_path = model_path
             for file in os.listdir(model_load_path):
                 if fnmatch.fnmatch(file, 'Epoch_*_sim_autoencoder*.pth'):
-                    model.load_state_dict(torch.load(os.path.join(model_load_path, file)))
+                    model.load_state_dict(torch.load(os.path.join(model_load_path, file), map_location=device))
 
 
         if action == 'extract_feature':
-            dataloader_stable = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=True, num_workers=4)
+            dataloader_stable = DataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                drop_last=True,
+                num_workers=args.num_workers,
+            )
             features = torch.empty([len(dataset), dim_z], dtype=torch.float, requires_grad=False, device='cpu')
             i = 0
             for data in dataloader_stable:
                 img, _, _ = data
-                img = img.cuda()
+                img = img.to(device)
                 img.requires_grad = False
                 # ===================forward=====================
                 z = model.encoder(img.detach())
@@ -372,6 +395,8 @@ if __name__ == "__main__":
                 gen_feature_path,
                 mode='train',
                 max_gen_samples=max_gen_samples,
+                thresh=angle_threshold,
+                dissim=rec_gen_distance,
                 max_iter=args.ot_max_iter,
                 lr=args.ot_lr,
                 bat_size_n=args.ot_bat_size_n,
@@ -393,56 +418,73 @@ if __name__ == "__main__":
                 gen_feature_path,
                 mode='generate',
                 max_gen_samples=max_gen_samples,
+                thresh=angle_threshold,
+                dissim=rec_gen_distance,
                 max_iter=args.ot_max_iter,
                 lr=args.ot_lr,
                 bat_size_n=args.ot_bat_size_n,
                 init_num_bat_n=args.ot_num_bat,
                 num_gen_x=args.ot_num_gen_x,
             )
-            torch.cuda.empty_cache() 
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
             
         if action == 'decode_feature':
+            model_loaded = False
             for file in os.listdir(model_path):
                 if fnmatch.fnmatch(file, 'Epoch_*_sim_refine_autoencoder*.pth'):
-                    model.load_state_dict(torch.load(os.path.join(model_path, file)))
+                    model.load_state_dict(torch.load(os.path.join(model_path, file), map_location=device))
+                    model_loaded = True
+            if not model_loaded:
+                for file in os.listdir(model_path):
+                    if fnmatch.fnmatch(file, 'Epoch_*_sim_autoencoder*.pth'):
+                        model.load_state_dict(torch.load(os.path.join(model_path, file), map_location=device))
+                        model_loaded = True
+
+            if not model_loaded:
+                raise RuntimeError("No autoencoder checkpoint found for decode_feature.")
+
             feature_dict = sio.loadmat(gen_feature_path)
             features = feature_dict['features']
             ids = feature_dict['ids']
-            
-            num_feature = features.shape[0]
-            num_ids = num_feature
-            z = torch.from_numpy(features).cuda()
-            z = z.view(num_feature,-1,1,1)
-            with torch.no_grad():
-                y = model.decoder(z)
-            
-            #=====================generate reconstructed-generated image pairs===========
-            for i in range(num_ids):
-                # pic_ori = dataset[ids[0, i]][0]            
-                # save_image(pic_ori, os.path.join(gen_im_pair_path, 'img_{0:03d}_ori.png'.format(i)))
-                # y_rec = y[i + num_ids,:,:,:]
-                # save_image(y_rec.cpu(), os.path.join(gen_im_pair_path, 'img_{0:03d}_rec.png'.format(i)))
-                y_gen = y[i,:,:,:]
-                save_image(y_gen.cpu(), os.path.join(gen_im_pair_path, 'img_{0:03d}_gen.png'.format(i)))
-                
-                print('Decoding {}/{}...'.format(i, num_ids))
 
-            #=====================generate random images=================================
-            y_all = torch.empty([64, 3, 64, 64])
-            num_bat_y = features.shape[0] // batch_size
-            features = features[:num_bat_y * batch_size, :]
+            if ids.ndim == 1:
+                num_generated = int(ids.shape[0])
+            else:
+                num_generated = int(ids.shape[-1])
+
+            decode_count = min(num_generated, int(args.decode_num_images))
+            if decode_count <= 0:
+                raise RuntimeError(
+                    "decode_num_images must be positive and generated features must be available."
+                )
+
+            print(
+                "Decoding generated features only: {} of {} available.".format(
+                    decode_count, num_generated
+                )
+            )
+            features = features[:decode_count, :]
+
+            y_all = torch.empty([min(64, decode_count), 3, args.image_size, args.image_size])
+            num_batches = (decode_count + batch_size - 1) // batch_size
             count = 0
-            for i in range(min(num_bat_y, 5)):
-                z = torch.from_numpy(features[i*batch_size : (i+1)*batch_size, :]).cuda()
-                z = z.view(batch_size, -1, 1, 1)
-                y = model.decoder(z)            
-                print('Decoding {}/{}...'.format(i*batch_size, features.shape[0]))
-                for ii in range(batch_size):
-                    save_image(y[ii, :, :, :].cpu(), os.path.join(gen_im_path, 'gen_img_{0:03d}.png'.format(count)))
-                    if count < 64:
+            model.eval()
+            for i in range(num_batches):
+                batch_features = features[i * batch_size : (i + 1) * batch_size, :]
+                if batch_features.shape[0] == 0:
+                    continue
+                z = torch.from_numpy(batch_features).to(device)
+                z = z.view(batch_features.shape[0], -1, 1, 1)
+                with torch.no_grad():
+                    y = model.decoder(z)
+                print('Decoding {}/{}...'.format(min((i + 1) * batch_size, decode_count), decode_count))
+                for ii in range(y.shape[0]):
+                    save_image(y[ii, :, :, :].cpu(), os.path.join(gen_im_path, 'gen_img_{0:06d}.png'.format(count)))
+                    if count < y_all.shape[0]:
                         y_all[count] = y[ii, :, :, :].cpu()
                     count += 1
-                
-            print('Decoding complete. ')
+
+            print('Decoding complete. Saved {} images.'.format(count))
             save_image(y_all, os.path.join(gen_im_path, '..', 'gen_img.png'), nrow=8)

@@ -1,145 +1,105 @@
-# CelebA FM-vs-OT Comparison Runner
+# CelebA FM-vs-OT Comparison
 
-This folder contains a runnable experiment pipeline to compare Flow Matching (FM) and Adaptive Monte Carlo OT on CelebA with exactly matched per-step sample budgets.
+This folder provides an end-to-end, Colab-ready experiment to compare:
 
-Budget match is enforced as:
+- `FM`: flow matching (`flow_matching/examples/image/train.py`)
+- `OT`: adaptive Monte Carlo OT (`pyOMT/demo2.py`)
 
-- OT per optimization step: `ot_bat_size_n * ot_num_bat = N`
-- FM per optimization step: `batch_size * accum_iter * world_size = N`
+## Fairness Protocol
 
-## Files
+The pipeline enforces fairness in three ways:
 
-- `run_celeba_fm_ot_compare.py`: end-to-end launcher (train, generate, evaluate, summarize).
-- `evaluate_generated_images.py`: unified evaluator for generated image folders (FID, optional KID, optional precision/recall).
-- `config.example.json`: template config.
+1. Same per-step sample budget (`N`):
+   - OT: `ot_bat_size_n * ot_num_bat = N`
+   - FM: `batch_size * accum_iter * world_size = N`
+2. Same data preprocessing for both methods:
+   - center crop to `center_crop_size` (default `178`)
+   - resize to `image_size` (default `64x64`)
+3. Same evaluation sample count per run:
+   - metrics use `min(generated_eval_samples, OT_available, FM_available)` when `enforce_equal_eval_samples=true`
+   - deterministic subset sampling controlled by `seed`
 
-## Dataset Layout
+## Colab: One Command
 
-### OT (pyOMT)
+From a Colab runtime where this repo is already at `/content/AE_OT`:
 
-`pyOMT/demo2.py` expects directory trees for:
-
-- `ot.data_root_train`
-- `ot.data_root_test`
-
-with image files in subfolders.
-
-### FM (flow_matching)
-
-`flow_matching/examples/image/train.py` uses `torchvision.datasets.ImageFolder`, so `fm.data_path` must follow ImageFolder format, for example:
-
-```text
-/path/to/celeba_imagefolder/train/
-  face/
-    000001.jpg
-    000002.jpg
-    ...
+```bash
+%cd /content/AE_OT
+!bash experiments/fm_ot/run_colab_end_to_end.sh
 ```
 
-Using one class folder (`face/`) is acceptable for unconditional generation (`class_drop_prob=1.0`, `cfg_scale=0.0`).
+That command does all of the following:
 
-## Before Running
+- installs dependencies
+- downloads CelebA via `torchvision`
+- builds split folders used by both FM and OT
+- runs FM-vs-OT train/generate/evaluate
+- writes summary CSV/JSONL
 
-1. Copy and edit config:
+### Optional Runtime Knobs (Colab env vars)
+
+```bash
+%env MAX_TRAIN_IMAGES=50000
+%env MAX_TEST_IMAGES=10000
+%env DRY_RUN=0
+!bash experiments/fm_ot/run_colab_end_to_end.sh
+```
+
+Available env vars in `run_colab_end_to_end.sh`:
+
+- `CONFIG_PATH` (default `experiments/fm_ot/config.colab.json`)
+- `DOWNLOAD_ROOT` (default `/content/data/torchvision`)
+- `CELEBA_OUTPUT_ROOT` (default `/content/data/celeba`)
+- `MAX_TRAIN_IMAGES` (default `50000`)
+- `MAX_TEST_IMAGES` (default `10000`)
+- `MAX_VALID_IMAGES` (default `0`)
+- `SAMPLE_SEED` (default `0`)
+- `LINK_MODE` (`hardlink|symlink|copy`, default `hardlink`)
+- `DRY_RUN` (`1` for command preview)
+
+## Local/Custom Run
+
+1. Prepare CelebA split folders:
+
+```bash
+python experiments/fm_ot/prepare_celeba.py \
+  --download_root /path/to/torchvision \
+  --output_root /path/to/celeba
+```
+
+2. Copy and edit config:
 
 ```bash
 cp experiments/fm_ot/config.example.json experiments/fm_ot/config.local.json
 ```
 
-2. Set all paths in `config.local.json`:
-
-- `evaluation.real_eval_dir`
-- `fm.data_path`
-- `ot.data_root_train`
-- `ot.data_root_test`
-
-3. Confirm OT AE checkpoint availability.
-
-If `ot.actions` includes `extract_feature` / `decode_feature`, `pyOMT/demo2.py` should be able to load a trained AE checkpoint from its expected model folders.
-
-## Colab Quickstart
-
-Run these cells after `git clone`:
-
-```bash
-%cd /content
-!git clone https://github.com/<your-org-or-user>/AE_OT.git
-%cd /content/AE_OT
-!pip install -q -e ./flow_matching
-!pip install -q torchmetrics torch-fidelity scipy pillow
-```
-
-Create a Colab config:
-
-```bash
-!cp experiments/fm_ot/config.colab.example.json experiments/fm_ot/config.colab.json
-```
-
-Edit `experiments/fm_ot/config.colab.json` paths to your dataset location:
-
-- `evaluation.real_eval_dir`
-- `fm.data_path`
-- `ot.data_root_train`
-- `ot.data_root_test`
-
-If you do not already have AE checkpoints for `pyOMT/demo2.py`, add `train_ae` and `refine_ae` into `ot.actions` before `extract_feature`.
-
-If your FM data is not in ImageFolder layout, create a single-class folder:
-
-```bash
-!mkdir -p /content/data/celeba_imagefolder/train/face
-!find /content/data/celeba/training -type f \( -iname "*.jpg" -o -iname "*.png" \) -exec cp -n {} /content/data/celeba_imagefolder/train/face/ \;
-```
-
-Dry run:
-
-```bash
-!python experiments/fm_ot/run_celeba_fm_ot_compare.py \
-  --config experiments/fm_ot/config.colab.json \
-  --dry_run
-```
-
-Full run:
-
-```bash
-!python experiments/fm_ot/run_celeba_fm_ot_compare.py \
-  --config experiments/fm_ot/config.colab.json
-```
-
-## Run
-
-Dry run (print commands only):
-
-```bash
-python experiments/fm_ot/run_celeba_fm_ot_compare.py \
-  --config experiments/fm_ot/config.local.json \
-  --dry_run
-```
-
-Full run:
+3. Run:
 
 ```bash
 python experiments/fm_ot/run_celeba_fm_ot_compare.py \
   --config experiments/fm_ot/config.local.json
 ```
 
-Useful switches:
+## Main Files
 
-- `--skip_ot`
-- `--skip_fm`
-- `--skip_metrics`
+- `experiments/fm_ot/run_colab_end_to_end.sh`: one-command Colab launcher
+- `experiments/fm_ot/prepare_celeba.py`: automatic CelebA download + split preparation
+- `experiments/fm_ot/run_celeba_fm_ot_compare.py`: budget-matched FM/OT runner
+- `experiments/fm_ot/evaluate_generated_images.py`: FID/KID/PR evaluator with deterministic subset support
+- `experiments/fm_ot/config.colab.json`: ready-to-run Colab config
+- `experiments/fm_ot/config.example.json`: local template
 
 ## Outputs
 
-Per run:
+Per seed/budget run:
 
-- OT outputs under `.../budget_<N>/seed_<S>/ot/`
-- FM outputs under `.../budget_<N>/seed_<S>/fm/`
-- Metrics JSON files under `.../budget_<N>/seed_<S>/metrics/`
+- OT outputs: `.../budget_<N>/seed_<S>/ot/`
+- FM outputs: `.../budget_<N>/seed_<S>/fm/`
+- Metrics JSON: `.../budget_<N>/seed_<S>/metrics/`
 
-Global summary:
+Overall summary:
 
 - `summary.jsonl`
 - `summary.csv`
 
-inside `output_root`.
+under `output_root`.

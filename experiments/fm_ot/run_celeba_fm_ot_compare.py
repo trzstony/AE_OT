@@ -20,6 +20,9 @@ import time
 from typing import Dict, List
 
 
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="FM-vs-OT CelebA runner")
     parser.add_argument("--config", required=True, type=str, help="Path to JSON config.")
@@ -106,6 +109,22 @@ def build_ot_budget(budget: int, max_bat_size_n: int) -> Dict[str, int]:
     }
 
 
+def collect_image_count(root: Path) -> int:
+    if not root.exists():
+        return 0
+    return sum(
+        1
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+    )
+
+
+def add_optional_kv_args(cmd: List[str], cfg: Dict, key_to_arg: Dict[str, str]) -> None:
+    for key, arg_name in key_to_arg.items():
+        if key in cfg and cfg[key] is not None:
+            cmd.extend([arg_name, str(cfg[key])])
+
+
 def main() -> None:
     args = parse_args()
     config_path = Path(args.config).resolve()
@@ -127,6 +146,7 @@ def main() -> None:
     eval_cfg = config["evaluation"]
     real_eval_dir = Path(eval_cfg["real_eval_dir"]).resolve()
     generated_eval_samples = int(eval_cfg["generated_eval_samples"])
+    enforce_equal_eval_samples = bool(eval_cfg.get("enforce_equal_eval_samples", True))
 
     fm_cfg = config["fm"]
     ot_cfg = config["ot"]
@@ -197,6 +217,27 @@ def main() -> None:
                         str(ot_cfg["num_gen_x"]),
                     ]
                 )
+                add_optional_kv_args(
+                    ot_cmd,
+                    ot_cfg,
+                    {
+                        "num_workers": "--num_workers",
+                        "image_size": "--image_size",
+                        "center_crop_size": "--center_crop_size",
+                        "ae_num_epochs": "--ae_num_epochs",
+                        "ae_batch_size": "--ae_batch_size",
+                        "ae_learning_rate": "--ae_learning_rate",
+                        "ae_dim_z": "--ae_dim_z",
+                        "ae_dim_f": "--ae_dim_f",
+                        "ae_l1_lambda": "--ae_l1_lambda",
+                        "max_gen_samples": "--ot_max_gen_samples",
+                        "angle_threshold": "--ot_angle_threshold",
+                        "rec_gen_distance": "--ot_rec_gen_distance",
+                        "device": "--device",
+                    },
+                )
+                ot_decode_num_images = int(ot_cfg.get("decode_num_images", generated_eval_samples))
+                ot_cmd.extend(["--decode_num_images", str(ot_decode_num_images)])
                 run_command(ot_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
 
             if not args.skip_fm:
@@ -227,19 +268,36 @@ def main() -> None:
                     str(fm_cfg["cfg_scale"]),
                     "--ode_method",
                     str(fm_cfg["ode_method"]),
-                    "--ode_options",
-                    json.dumps({"step_size": fm_cfg["ode_step_size"]}),
                     "--num_workers",
                     str(fm_cfg["num_workers"]),
+                    "--image_size",
+                    str(fm_cfg.get("image_size", 64)),
+                    "--center_crop_size",
+                    str(fm_cfg.get("center_crop_size", 178)),
                 ]
+                ode_options = fm_cfg.get("ode_options")
+                if ode_options is None:
+                    ode_options = {"step_size": fm_cfg["ode_step_size"]}
+                fm_train_cmd.extend(["--ode_options", json.dumps(ode_options)])
+
                 if fm_cfg.get("compute_fid_during_train", False):
                     fm_train_cmd.append("--compute_fid")
                 if fm_cfg.get("use_ema", False):
                     fm_train_cmd.append("--use_ema")
+                if fm_cfg.get("decay_lr", False):
+                    fm_train_cmd.append("--decay_lr")
+                if fm_cfg.get("random_hflip", False):
+                    fm_train_cmd.append("--random_hflip")
                 run_command(fm_train_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
 
                 checkpoint_epoch = int(fm_cfg["epochs"]) - 1
                 checkpoint_path = fm_run_dir / f"checkpoint-{checkpoint_epoch}.pth"
+                if not args.dry_run and not checkpoint_path.exists():
+                    raise FileNotFoundError(
+                        f"Expected FM checkpoint not found: {checkpoint_path}. "
+                        "Check FM training logs for early failures."
+                    )
+
                 fm_eval_cmd = [
                     python_bin,
                     str(fm_script),
@@ -270,20 +328,54 @@ def main() -> None:
                     str(fm_cfg["cfg_scale"]),
                     "--ode_method",
                     str(fm_cfg["ode_method"]),
-                    "--ode_options",
-                    json.dumps({"step_size": fm_cfg["ode_step_size"]}),
                     "--num_workers",
                     str(fm_cfg["num_workers"]),
+                    "--image_size",
+                    str(fm_cfg.get("image_size", 64)),
+                    "--center_crop_size",
+                    str(fm_cfg.get("center_crop_size", 178)),
                 ]
+                fm_eval_cmd.extend(["--ode_options", json.dumps(ode_options)])
                 if fm_cfg.get("use_ema", False):
                     fm_eval_cmd.append("--use_ema")
+                if fm_cfg.get("random_hflip", False):
+                    fm_eval_cmd.append("--random_hflip")
                 run_command(fm_eval_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
 
             if args.skip_metrics:
                 continue
 
+            ot_fake_dir = ot_run_dir / "gen_imgs"
+            fm_fake_dir = fm_run_dir / "fid_samples"
+
+            if args.dry_run:
+                ot_available = generated_eval_samples
+                fm_available = generated_eval_samples
+            else:
+                ot_available = 0 if args.skip_ot else collect_image_count(ot_fake_dir)
+                fm_available = 0 if args.skip_fm else collect_image_count(fm_fake_dir)
+
+            eval_samples = generated_eval_samples
+            if enforce_equal_eval_samples:
+                candidates = [generated_eval_samples]
+                if not args.skip_ot:
+                    candidates.append(ot_available)
+                if not args.skip_fm:
+                    candidates.append(fm_available)
+                eval_samples = min(candidates)
+                if eval_samples <= 0:
+                    raise RuntimeError(
+                        "No generated images found for fair evaluation. "
+                        f"OT available={ot_available}, FM available={fm_available}."
+                    )
+
+            print(
+                "[INFO] Evaluation sample budget: "
+                f"target={generated_eval_samples}, OT_available={ot_available}, "
+                f"FM_available={fm_available}, used={eval_samples}"
+            )
+
             if not args.skip_ot:
-                ot_fake_dir = ot_run_dir / "gen_imgs"
                 ot_metrics_json = metrics_dir / "ot_metrics.json"
                 ot_metrics_cmd = [
                     python_bin,
@@ -298,6 +390,10 @@ def main() -> None:
                     str(eval_cfg["batch_size"]),
                     "--num_workers",
                     str(eval_cfg["num_workers"]),
+                    "--max_images",
+                    str(eval_samples),
+                    "--sample_seed",
+                    str(seed),
                     "--output_json",
                     str(ot_metrics_json),
                 ]
@@ -327,12 +423,13 @@ def main() -> None:
                             "fm_accum_iter": fm_budget["accum_iter"],
                             "ot_bat_size_n": ot_budget["bat_size_n"],
                             "ot_num_bat": ot_budget["num_bat"],
+                            "eval_samples_used": eval_samples,
+                            "available_fake_images": ot_available,
                             **ot_metrics,
                         }
                     )
 
             if not args.skip_fm:
-                fm_fake_dir = fm_run_dir / "fid_samples"
                 fm_metrics_json = metrics_dir / "fm_metrics.json"
                 fm_metrics_cmd = [
                     python_bin,
@@ -347,6 +444,10 @@ def main() -> None:
                     str(eval_cfg["batch_size"]),
                     "--num_workers",
                     str(eval_cfg["num_workers"]),
+                    "--max_images",
+                    str(eval_samples),
+                    "--sample_seed",
+                    str(seed),
                     "--output_json",
                     str(fm_metrics_json),
                 ]
@@ -376,6 +477,8 @@ def main() -> None:
                             "fm_accum_iter": fm_budget["accum_iter"],
                             "ot_bat_size_n": ot_budget["bat_size_n"],
                             "ot_num_bat": ot_budget["num_bat"],
+                            "eval_samples_used": eval_samples,
+                            "available_fake_images": fm_available,
                             **fm_metrics,
                         }
                     )

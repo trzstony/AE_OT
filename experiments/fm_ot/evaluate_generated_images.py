@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import random
 from typing import Dict, List
 
 from PIL import Image
@@ -65,6 +66,18 @@ def build_loader(image_paths: List[Path], batch_size: int, num_workers: int) -> 
     )
 
 
+def sample_image_paths(
+    image_paths: List[Path],
+    max_images: int,
+    seed: int,
+) -> List[Path]:
+    if max_images <= 0 or len(image_paths) <= max_images:
+        return image_paths
+    rng = random.Random(seed)
+    sampled_idx = sorted(rng.sample(range(len(image_paths)), k=max_images))
+    return [image_paths[i] for i in sampled_idx]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate generated image folder.")
     parser.add_argument("--real_dir", required=True, type=str)
@@ -81,6 +94,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compute_pr", action="store_true")
     parser.add_argument("--kid_subsets", default=50, type=int)
     parser.add_argument("--kid_subset_size", default=1000, type=int)
+    parser.add_argument(
+        "--max_images",
+        default=0,
+        type=int,
+        help="If >0, evaluate using at most this many images from each set.",
+    )
+    parser.add_argument(
+        "--sample_seed",
+        default=0,
+        type=int,
+        help="Seed for deterministic image subset sampling when --max_images is used.",
+    )
     parser.add_argument("--output_json", default="", type=str)
     return parser.parse_args()
 
@@ -157,6 +182,8 @@ def main() -> None:
     fake_dir = Path(args.fake_dir).resolve()
     real_images = collect_images(real_dir)
     fake_images = collect_images(fake_dir)
+    real_images = sample_image_paths(real_images, args.max_images, args.sample_seed)
+    fake_images = sample_image_paths(fake_images, args.max_images, args.sample_seed)
 
     real_loader = build_loader(real_images, args.batch_size, args.num_workers)
     fake_loader = build_loader(fake_images, args.batch_size, args.num_workers)
@@ -181,6 +208,11 @@ def main() -> None:
         )
 
     if args.compute_pr:
+        if args.max_images > 0:
+            raise ValueError(
+                "Precision/recall currently uses directory-level inputs via torch-fidelity. "
+                "Use --max_images 0 when --compute_pr is enabled."
+            )
         metrics.update(evaluate_precision_recall(real_dir, fake_dir, device))
 
     output = json.dumps(metrics, indent=2, sort_keys=True)

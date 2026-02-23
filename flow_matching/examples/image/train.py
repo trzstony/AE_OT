@@ -57,8 +57,12 @@ def main(args):
     cudnn.benchmark = True
 
     logger.info(f"Initializing Dataset: {args.dataset}")
-    transform_train = get_train_transform()
-    if args.dataset == "imagenet":
+    transform_train = get_train_transform(
+        image_size=args.image_size,
+        center_crop_size=args.center_crop_size,
+        random_hflip=args.random_hflip,
+    )
+    if args.dataset in {"imagenet", "celeba64_tiny"}:
         dataset_train = datasets.ImageFolder(args.data_path, transform=transform_train)
     elif args.dataset == "cifar10":
         dataset_train = datasets.CIFAR10(

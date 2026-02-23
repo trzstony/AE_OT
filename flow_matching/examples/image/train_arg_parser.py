@@ -84,6 +84,23 @@ def get_args_parser():
         type=str,
         help="imagenet root folder with train, val and test subfolders",
     )
+    parser.add_argument(
+        "--image_size",
+        default=64,
+        type=int,
+        help="Final image size after preprocessing.",
+    )
+    parser.add_argument(
+        "--center_crop_size",
+        default=178,
+        type=int,
+        help="Center crop size applied before resizing.",
+    )
+    parser.add_argument(
+        "--random_hflip",
+        action="store_true",
+        help="Enable random horizontal flips during training.",
+    )
 
     parser.add_argument(
         "--output_dir",
