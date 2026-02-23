@@ -12,6 +12,9 @@ cd "$REPO_ROOT"
 : "${MAX_VALID_IMAGES:=0}"
 : "${SAMPLE_SEED:=0}"
 : "${LINK_MODE:=hardlink}"
+: "${SOURCE_BACKEND:=auto}"
+: "${ALLOW_PARTITION_DOWNLOAD:=1}"
+: "${PARTITION_URL:=https://huggingface.co/datasets/noname110/celeba/resolve/main/list_eval_partition.txt}"
 : "${DRY_RUN:=0}"
 
 echo "[INFO] Repo root: $REPO_ROOT"
@@ -24,10 +27,13 @@ python experiments/fm_ot/prepare_celeba.py \
   --download_root "$DOWNLOAD_ROOT" \
   --output_root "$CELEBA_OUTPUT_ROOT" \
   --link_mode "$LINK_MODE" \
+  --source_backend "$SOURCE_BACKEND" \
+  --partition_url "$PARTITION_URL" \
   --max_train_images "$MAX_TRAIN_IMAGES" \
   --max_test_images "$MAX_TEST_IMAGES" \
   --max_valid_images "$MAX_VALID_IMAGES" \
-  --sample_seed "$SAMPLE_SEED"
+  --sample_seed "$SAMPLE_SEED" \
+  $( [[ "$ALLOW_PARTITION_DOWNLOAD" == "1" ]] && echo "--allow_partition_download" )
 
 echo "[INFO] Running FM-vs-OT comparison"
 if [[ "$DRY_RUN" == "1" ]]; then
