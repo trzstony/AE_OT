@@ -42,6 +42,7 @@ That command does all of the following:
 %env MAX_TRAIN_IMAGES=50000
 %env MAX_TEST_IMAGES=10000
 %env SOURCE_BACKEND=auto
+%env REUSE_EXISTING=1
 %env DRY_RUN=0
 !bash experiments/fm_ot/run_colab_end_to_end.sh
 ```
@@ -59,6 +60,7 @@ Available env vars in `run_colab_end_to_end.sh`:
 - `SOURCE_BACKEND` (`auto|torchvision|udacity_zip`, default `auto`)
 - `ALLOW_PARTITION_DOWNLOAD` (`1|0`, default `1`)
 - `PARTITION_URL` (default HF mirror of `list_eval_partition.txt`)
+- `REUSE_EXISTING` (`1|0`, default `1`) to resume from existing OT/FM artifacts
 - `DRY_RUN` (`1` for command preview)
 
 ## Local/Custom Run

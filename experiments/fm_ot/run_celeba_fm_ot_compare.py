@@ -30,6 +30,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip_fm", action="store_true")
     parser.add_argument("--skip_ot", action="store_true")
     parser.add_argument("--skip_metrics", action="store_true")
+    parser.add_argument(
+        "--reuse_existing",
+        action="store_true",
+        help=(
+            "Reuse existing artifacts when present (OT generated images, "
+            "FM checkpoint/fid_samples) instead of retraining/regenerating."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -119,6 +127,10 @@ def collect_image_count(root: Path) -> int:
     )
 
 
+def dir_has_images(root: Path) -> bool:
+    return collect_image_count(root) > 0
+
+
 def add_optional_kv_args(cmd: List[str], cfg: Dict, key_to_arg: Dict[str, str]) -> None:
     for key, arg_name in key_to_arg.items():
         if key in cfg and cfg[key] is not None:
@@ -188,159 +200,185 @@ def main() -> None:
             )
 
             if not args.skip_ot:
-                ot_actions = ot_cfg.get(
-                    "actions",
-                    ["extract_feature", "train_ot", "generate_feature", "decode_feature"],
-                )
-                ot_cmd = [python_bin, str(ot_script)]
-                for action in ot_actions:
-                    ot_cmd.append(f"--{action}")
-                ot_cmd.extend(
-                    [
-                        "--data_root_train",
-                        str(ot_cfg["data_root_train"]),
-                        "--data_root_test",
-                        str(ot_cfg["data_root_test"]),
-                        "--result_root",
-                        str(ot_run_dir),
-                        "--seed",
-                        str(seed),
-                        "--ot_max_iter",
-                        str(ot_cfg["max_iter"]),
-                        "--ot_lr",
-                        str(ot_cfg["lr"]),
-                        "--ot_bat_size_n",
-                        str(ot_budget["bat_size_n"]),
-                        "--ot_num_bat",
-                        str(ot_budget["num_bat"]),
-                        "--ot_num_gen_x",
-                        str(ot_cfg["num_gen_x"]),
-                    ]
-                )
-                add_optional_kv_args(
-                    ot_cmd,
-                    ot_cfg,
-                    {
-                        "num_workers": "--num_workers",
-                        "image_size": "--image_size",
-                        "center_crop_size": "--center_crop_size",
-                        "ae_num_epochs": "--ae_num_epochs",
-                        "ae_batch_size": "--ae_batch_size",
-                        "ae_learning_rate": "--ae_learning_rate",
-                        "ae_dim_z": "--ae_dim_z",
-                        "ae_dim_f": "--ae_dim_f",
-                        "ae_l1_lambda": "--ae_l1_lambda",
-                        "max_gen_samples": "--ot_max_gen_samples",
-                        "angle_threshold": "--ot_angle_threshold",
-                        "rec_gen_distance": "--ot_rec_gen_distance",
-                        "device": "--device",
-                    },
-                )
-                ot_decode_num_images = int(ot_cfg.get("decode_num_images", generated_eval_samples))
-                ot_cmd.extend(["--decode_num_images", str(ot_decode_num_images)])
-                run_command(ot_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
+                ot_fake_dir = ot_run_dir / "gen_imgs"
+                if args.reuse_existing and dir_has_images(ot_fake_dir):
+                    print(f"[INFO] Reusing existing OT outputs at {ot_fake_dir}")
+                else:
+                    ot_actions = ot_cfg.get(
+                        "actions",
+                        ["extract_feature", "train_ot", "generate_feature", "decode_feature"],
+                    )
+                    ot_cmd = [python_bin, str(ot_script)]
+                    for action in ot_actions:
+                        ot_cmd.append(f"--{action}")
+                    ot_cmd.extend(
+                        [
+                            "--data_root_train",
+                            str(ot_cfg["data_root_train"]),
+                            "--data_root_test",
+                            str(ot_cfg["data_root_test"]),
+                            "--result_root",
+                            str(ot_run_dir),
+                            "--seed",
+                            str(seed),
+                            "--ot_max_iter",
+                            str(ot_cfg["max_iter"]),
+                            "--ot_lr",
+                            str(ot_cfg["lr"]),
+                            "--ot_bat_size_n",
+                            str(ot_budget["bat_size_n"]),
+                            "--ot_num_bat",
+                            str(ot_budget["num_bat"]),
+                            "--ot_num_gen_x",
+                            str(ot_cfg["num_gen_x"]),
+                        ]
+                    )
+                    add_optional_kv_args(
+                        ot_cmd,
+                        ot_cfg,
+                        {
+                            "num_workers": "--num_workers",
+                            "image_size": "--image_size",
+                            "center_crop_size": "--center_crop_size",
+                            "ae_num_epochs": "--ae_num_epochs",
+                            "ae_batch_size": "--ae_batch_size",
+                            "ae_learning_rate": "--ae_learning_rate",
+                            "ae_dim_z": "--ae_dim_z",
+                            "ae_dim_f": "--ae_dim_f",
+                            "ae_l1_lambda": "--ae_l1_lambda",
+                            "max_gen_samples": "--ot_max_gen_samples",
+                            "angle_threshold": "--ot_angle_threshold",
+                            "rec_gen_distance": "--ot_rec_gen_distance",
+                            "device": "--device",
+                        },
+                    )
+                    ot_decode_num_images = int(ot_cfg.get("decode_num_images", generated_eval_samples))
+                    ot_cmd.extend(["--decode_num_images", str(ot_decode_num_images)])
+                    run_command(ot_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
 
             if not args.skip_fm:
-                fm_train_cmd = [
-                    python_bin,
-                    str(fm_script),
-                    "--dataset",
-                    str(fm_cfg["dataset"]),
-                    "--data_path",
-                    str(fm_cfg["data_path"]),
-                    "--output_dir",
-                    str(fm_run_dir),
-                    "--seed",
-                    str(seed),
-                    "--batch_size",
-                    str(fm_budget["batch_size"]),
-                    "--accum_iter",
-                    str(fm_budget["accum_iter"]),
-                    "--epochs",
-                    str(fm_cfg["epochs"]),
-                    "--eval_frequency",
-                    str(fm_cfg["eval_frequency"]),
-                    "--lr",
-                    str(fm_cfg["lr"]),
-                    "--class_drop_prob",
-                    str(fm_cfg["class_drop_prob"]),
-                    "--cfg_scale",
-                    str(fm_cfg["cfg_scale"]),
-                    "--ode_method",
-                    str(fm_cfg["ode_method"]),
-                    "--num_workers",
-                    str(fm_cfg["num_workers"]),
-                    "--image_size",
-                    str(fm_cfg.get("image_size", 64)),
-                    "--center_crop_size",
-                    str(fm_cfg.get("center_crop_size", 178)),
-                ]
-                ode_options = fm_cfg.get("ode_options")
-                if ode_options is None:
-                    ode_options = {"step_size": fm_cfg["ode_step_size"]}
-                fm_train_cmd.extend(["--ode_options", json.dumps(ode_options)])
-
-                if fm_cfg.get("compute_fid_during_train", False):
-                    fm_train_cmd.append("--compute_fid")
-                if fm_cfg.get("use_ema", False):
-                    fm_train_cmd.append("--use_ema")
-                if fm_cfg.get("decay_lr", False):
-                    fm_train_cmd.append("--decay_lr")
-                if fm_cfg.get("random_hflip", False):
-                    fm_train_cmd.append("--random_hflip")
-                run_command(fm_train_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
-
+                fm_fake_dir = fm_run_dir / "fid_samples"
                 checkpoint_epoch = int(fm_cfg["epochs"]) - 1
                 checkpoint_path = fm_run_dir / f"checkpoint-{checkpoint_epoch}.pth"
-                if not args.dry_run and not checkpoint_path.exists():
+
+                checkpoint_exists = checkpoint_path.exists()
+                fake_count = collect_image_count(fm_fake_dir) if (args.reuse_existing and not args.dry_run) else 0
+
+                if args.reuse_existing and checkpoint_exists:
+                    print(f"[INFO] Reusing existing FM checkpoint at {checkpoint_path}")
+                else:
+                    fm_train_cmd = [
+                        python_bin,
+                        str(fm_script),
+                        "--dataset",
+                        str(fm_cfg["dataset"]),
+                        "--data_path",
+                        str(fm_cfg["data_path"]),
+                        "--output_dir",
+                        str(fm_run_dir),
+                        "--seed",
+                        str(seed),
+                        "--batch_size",
+                        str(fm_budget["batch_size"]),
+                        "--accum_iter",
+                        str(fm_budget["accum_iter"]),
+                        "--epochs",
+                        str(fm_cfg["epochs"]),
+                        "--eval_frequency",
+                        str(fm_cfg["eval_frequency"]),
+                        "--lr",
+                        str(fm_cfg["lr"]),
+                        "--class_drop_prob",
+                        str(fm_cfg["class_drop_prob"]),
+                        "--cfg_scale",
+                        str(fm_cfg["cfg_scale"]),
+                        "--ode_method",
+                        str(fm_cfg["ode_method"]),
+                        "--num_workers",
+                        str(fm_cfg["num_workers"]),
+                        "--image_size",
+                        str(fm_cfg.get("image_size", 64)),
+                        "--center_crop_size",
+                        str(fm_cfg.get("center_crop_size", 178)),
+                    ]
+                    ode_options = fm_cfg.get("ode_options")
+                    if ode_options is None:
+                        ode_options = {"step_size": fm_cfg["ode_step_size"]}
+                    fm_train_cmd.extend(["--ode_options", json.dumps(ode_options)])
+
+                    if fm_cfg.get("compute_fid_during_train", False):
+                        fm_train_cmd.append("--compute_fid")
+                    if fm_cfg.get("use_ema", False):
+                        fm_train_cmd.append("--use_ema")
+                    if fm_cfg.get("decay_lr", False):
+                        fm_train_cmd.append("--decay_lr")
+                    if fm_cfg.get("random_hflip", False):
+                        fm_train_cmd.append("--random_hflip")
+                    run_command(fm_train_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
+
+                    checkpoint_exists = checkpoint_path.exists() if not args.dry_run else True
+
+                if not args.dry_run and not checkpoint_exists:
                     raise FileNotFoundError(
                         f"Expected FM checkpoint not found: {checkpoint_path}. "
                         "Check FM training logs for early failures."
                     )
 
-                fm_eval_cmd = [
-                    python_bin,
-                    str(fm_script),
-                    "--dataset",
-                    str(fm_cfg["dataset"]),
-                    "--data_path",
-                    str(fm_cfg["data_path"]),
-                    "--output_dir",
-                    str(fm_run_dir),
-                    "--seed",
-                    str(seed),
-                    "--batch_size",
-                    str(fm_budget["batch_size"]),
-                    "--accum_iter",
-                    str(fm_budget["accum_iter"]),
-                    "--epochs",
-                    str(fm_cfg["epochs"]),
-                    "--eval_only",
-                    "--resume",
-                    str(checkpoint_path),
-                    "--compute_fid",
-                    "--save_fid_samples",
-                    "--fid_samples",
-                    str(generated_eval_samples),
-                    "--class_drop_prob",
-                    str(fm_cfg["class_drop_prob"]),
-                    "--cfg_scale",
-                    str(fm_cfg["cfg_scale"]),
-                    "--ode_method",
-                    str(fm_cfg["ode_method"]),
-                    "--num_workers",
-                    str(fm_cfg["num_workers"]),
-                    "--image_size",
-                    str(fm_cfg.get("image_size", 64)),
-                    "--center_crop_size",
-                    str(fm_cfg.get("center_crop_size", 178)),
-                ]
-                fm_eval_cmd.extend(["--ode_options", json.dumps(ode_options)])
-                if fm_cfg.get("use_ema", False):
-                    fm_eval_cmd.append("--use_ema")
-                if fm_cfg.get("random_hflip", False):
-                    fm_eval_cmd.append("--random_hflip")
-                run_command(fm_eval_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
+                need_fm_eval = True
+                if args.reuse_existing and not args.dry_run and fake_count >= generated_eval_samples:
+                    need_fm_eval = False
+                    print(
+                        f"[INFO] Reusing existing FM fid_samples at {fm_fake_dir} "
+                        f"(found {fake_count} images)"
+                    )
+
+                if need_fm_eval:
+                    fm_eval_cmd = [
+                        python_bin,
+                        str(fm_script),
+                        "--dataset",
+                        str(fm_cfg["dataset"]),
+                        "--data_path",
+                        str(fm_cfg["data_path"]),
+                        "--output_dir",
+                        str(fm_run_dir),
+                        "--seed",
+                        str(seed),
+                        "--batch_size",
+                        str(fm_budget["batch_size"]),
+                        "--accum_iter",
+                        str(fm_budget["accum_iter"]),
+                        "--epochs",
+                        str(fm_cfg["epochs"]),
+                        "--eval_only",
+                        "--resume",
+                        str(checkpoint_path),
+                        "--compute_fid",
+                        "--save_fid_samples",
+                        "--fid_samples",
+                        str(generated_eval_samples),
+                        "--class_drop_prob",
+                        str(fm_cfg["class_drop_prob"]),
+                        "--cfg_scale",
+                        str(fm_cfg["cfg_scale"]),
+                        "--ode_method",
+                        str(fm_cfg["ode_method"]),
+                        "--num_workers",
+                        str(fm_cfg["num_workers"]),
+                        "--image_size",
+                        str(fm_cfg.get("image_size", 64)),
+                        "--center_crop_size",
+                        str(fm_cfg.get("center_crop_size", 178)),
+                    ]
+                    ode_options = fm_cfg.get("ode_options")
+                    if ode_options is None:
+                        ode_options = {"step_size": fm_cfg["ode_step_size"]}
+                    fm_eval_cmd.extend(["--ode_options", json.dumps(ode_options)])
+                    if fm_cfg.get("use_ema", False):
+                        fm_eval_cmd.append("--use_ema")
+                    if fm_cfg.get("random_hflip", False):
+                        fm_eval_cmd.append("--random_hflip")
+                    run_command(fm_eval_cmd, cwd=project_root, env=env, dry_run=args.dry_run)
 
             if args.skip_metrics:
                 continue

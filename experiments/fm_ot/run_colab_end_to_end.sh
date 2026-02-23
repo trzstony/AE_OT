@@ -15,6 +15,7 @@ cd "$REPO_ROOT"
 : "${SOURCE_BACKEND:=auto}"
 : "${ALLOW_PARTITION_DOWNLOAD:=1}"
 : "${PARTITION_URL:=https://huggingface.co/datasets/noname110/celeba/resolve/main/list_eval_partition.txt}"
+: "${REUSE_EXISTING:=1}"
 : "${DRY_RUN:=0}"
 
 echo "[INFO] Repo root: $REPO_ROOT"
@@ -37,9 +38,11 @@ python experiments/fm_ot/prepare_celeba.py \
 
 echo "[INFO] Running FM-vs-OT comparison"
 if [[ "$DRY_RUN" == "1" ]]; then
-  python experiments/fm_ot/run_celeba_fm_ot_compare.py --config "$CONFIG_PATH" --dry_run
+  python experiments/fm_ot/run_celeba_fm_ot_compare.py --config "$CONFIG_PATH" --dry_run \
+    $( [[ "$REUSE_EXISTING" == "1" ]] && echo "--reuse_existing" )
 else
-  python experiments/fm_ot/run_celeba_fm_ot_compare.py --config "$CONFIG_PATH"
+  python experiments/fm_ot/run_celeba_fm_ot_compare.py --config "$CONFIG_PATH" \
+    $( [[ "$REUSE_EXISTING" == "1" ]] && echo "--reuse_existing" )
 fi
 
 echo "[INFO] Done. Summary under /content/AE_OT/experiments/fm_ot/runs/celeba_fm_vs_ot"
