@@ -63,6 +63,42 @@ Available env vars in `run_colab_end_to_end.sh`:
 - `REUSE_EXISTING` (`1|0`, default `1`) to resume from existing OT/FM artifacts
 - `DRY_RUN` (`1` for command preview)
 
+### Quality-Time Tuning For <=1000 Outputs
+
+If you only need around 1000 generated images, use the default
+`experiments/fm_ot/config.colab.json` and set:
+
+```bash
+%env CONFIG_PATH=experiments/fm_ot/config.colab.json
+%env MAX_TRAIN_IMAGES=30000
+%env MAX_TEST_IMAGES=5000
+%env REUSE_EXISTING=1
+!bash experiments/fm_ot/run_colab_end_to_end.sh
+```
+
+This preset makes the following tradeoff:
+
+- lowers generation/evaluation image count to `1000` to cut Colab runtime
+- uses that saved time for slightly stronger FM/OT training (better visual quality)
+- keeps fairness by still matching per-step budget `N` between FM and OT
+
+Important note on OT `N=20000`:
+
+- In the original `pyOMT/demo2.py` defaults, `N = ot_bat_size_n * ot_num_bat = 1000 * 20 = 20000`.
+- In this FM-vs-OT runner, `N` is controlled by `budgets` in config and then mapped to both methods.
+- So if `budgets=[1024]`, OT uses a matched decomposition (for example `512 * 2`) rather than the original demo default.
+
+Main quality knobs for this pipeline:
+
+- FM: `epochs`, `use_ema`, `ode_step_size`, `random_hflip`
+- OT: `ae_num_epochs`, `max_iter`, `angle_threshold`, `rec_gen_distance`
+- Runtime cap: `evaluation.generated_eval_samples`, `ot.decode_num_images`
+
+For an even shorter sanity-check run, use:
+
+- `experiments/fm_ot/config.colab.faster.json`
+- this preset uses `N=512`, `500` generated/eval images, shorter FM/OT training, and disables KID
+
 ## Local/Custom Run
 
 1. Prepare CelebA split folders:
