@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import random
+import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -15,7 +16,15 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import yaml
 
-from pyOMT.networks import autoencoder
+try:
+    from pyOMT.networks import autoencoder
+except ModuleNotFoundError:
+    # Fallback for environments where pyOMT is a plain folder (no package init).
+    project_root = Path(__file__).resolve().parents[2]
+    pyomt_dir = project_root / "pyOMT"
+    if str(pyomt_dir) not in sys.path:
+        sys.path.insert(0, str(pyomt_dir))
+    from networks import autoencoder
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}

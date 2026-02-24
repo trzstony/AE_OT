@@ -92,6 +92,7 @@ def _compute_fid_kid(
     fake_paths: List[Path],
     device: torch.device,
     batch_size: int,
+    compute_fid: bool,
     compute_kid: bool,
     kid_subsets: int,
     kid_subset_size: int,
@@ -102,6 +103,10 @@ def _compute_fid_kid(
         "kid_std": None,
         "status": "ok",
     }
+    if not compute_fid and not compute_kid:
+        out["status"] = "skipped"
+        return out
+
     try:
         from torchmetrics.image.fid import FrechetInceptionDistance
         from torchmetrics.image.kid import KernelInceptionDistance
@@ -112,29 +117,38 @@ def _compute_fid_kid(
     real_loader = _build_loader(real_paths, batch_size=batch_size)
     fake_loader = _build_loader(fake_paths, batch_size=batch_size)
 
-    fid = FrechetInceptionDistance(normalize=True).to(device)
-    with torch.no_grad():
-        for batch in real_loader:
-            fid.update(batch.to(device), real=True)
-        for batch in fake_loader:
-            fid.update(batch.to(device), real=False)
-    out["fid"] = float(fid.compute().detach().cpu().item())
+    if compute_fid:
+        try:
+            fid = FrechetInceptionDistance(normalize=True).to(device)
+            with torch.no_grad():
+                for batch in real_loader:
+                    fid.update(batch.to(device), real=True)
+                for batch in fake_loader:
+                    fid.update(batch.to(device), real=False)
+            out["fid"] = float(fid.compute().detach().cpu().item())
+        except Exception as ex:
+            out["status"] = f"fid_error:{type(ex).__name__}"
 
     if compute_kid:
-        kid = KernelInceptionDistance(
-            feature=2048,
-            subsets=kid_subsets,
-            subset_size=kid_subset_size,
-            normalize=True,
-        ).to(device)
-        with torch.no_grad():
-            for batch in real_loader:
-                kid.update(batch.to(device), real=True)
-            for batch in fake_loader:
-                kid.update(batch.to(device), real=False)
-        mean, std = kid.compute()
-        out["kid_mean"] = float(mean.detach().cpu().item())
-        out["kid_std"] = float(std.detach().cpu().item())
+        try:
+            kid = KernelInceptionDistance(
+                feature=2048,
+                subsets=kid_subsets,
+                subset_size=kid_subset_size,
+                normalize=True,
+            ).to(device)
+            with torch.no_grad():
+                for batch in real_loader:
+                    kid.update(batch.to(device), real=True)
+                for batch in fake_loader:
+                    kid.update(batch.to(device), real=False)
+            mean, std = kid.compute()
+            out["kid_mean"] = float(mean.detach().cpu().item())
+            out["kid_std"] = float(std.detach().cpu().item())
+        except Exception as ex:
+            prev = str(out.get("status", "ok"))
+            tag = f"kid_error:{type(ex).__name__}"
+            out["status"] = tag if prev in {"ok", "skipped"} else f"{prev};{tag}"
 
     return out
 
@@ -339,6 +353,7 @@ def _evaluate_method(
         fake_paths=fake_paths,
         device=device,
         batch_size=64,
+        compute_fid=bool(cfg["eval"].get("compute_fid", False)),
         compute_kid=bool(cfg["eval"].get("compute_kid", False)),
         kid_subsets=int(cfg["eval"].get("kid_subsets", 10)),
         kid_subset_size=int(cfg["eval"].get("kid_subset_size", 100)),
