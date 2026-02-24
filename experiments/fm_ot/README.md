@@ -1,3 +1,8 @@
+# Legacy Notice
+
+This folder is the legacy FM-vs-OT experiment track.
+New shared-latent fair-comparison experiments live under `experiments/latent_fm_ot_v2`.
+
 # CelebA FM-vs-OT Comparison
 
 This folder provides an end-to-end, Colab-ready experiment to compare:

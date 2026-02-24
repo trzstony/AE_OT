@@ -1,0 +1,68 @@
+dataset:
+  name: celeba64
+  image_size: 64
+  center_crop_size: 178
+  train_dir: /path/to/celeba/training
+  test_dir: /path/to/celeba/testing
+  num_workers: 4
+
+ae:
+  dim_z: 100
+  dim_f: 80
+  batch_size: 256
+  num_epochs: 20
+  learning_rate: 2.0e-5
+  l1_lambda: 1.0e-5
+  freeze_after_pretrain: true
+  save_every: 5
+
+latent_cache:
+  dtype: float32
+  save_train_latents: true
+  save_test_latents: true
+
+fm:
+  hidden_dim: 512
+  depth: 4
+  learning_rate: 1.0e-4
+  weight_decay: 0.0
+  max_microbatch: 1024
+  optimizer_betas: [0.9, 0.95]
+  ode_method: midpoint
+  ode_steps: 100
+
+ot:
+  learning_rate: 5.0e-2
+  point_batch_size: 4096
+  x_proposal_batch: 2048
+  topk: 5
+  angle_threshold: 0.7
+  dissimilarity: 0.75
+  sample_chunk_size: 2048
+  max_steps: 1500
+
+budget_schedule:
+  base_N: 1024
+  ot_energy_patience: 30
+  ot_energy_min_delta: 1.0e-4
+  max_doublings: 3
+  sync_fm_to_ot: true
+  checkpoint_interval_steps: 100
+
+eval:
+  generated_samples: 1000
+  equal_sample_count: true
+  compute_fid: false
+  compute_kid: false
+  compute_pr: false
+  kid_subsets: 10
+  kid_subset_size: 100
+  max_eval_images: 1000
+  latent_swd_projections: 128
+  latent_swd_bins: 256
+
+seeds: [0, 1, 2]
+
+paths:
+  output_root: /Volumes/Files/AE_OT/experiments/latent_fm_ot_v2/runs/celeba64_fair
+  python_bin: python
