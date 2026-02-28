@@ -10,11 +10,6 @@ ae:
   dim_z: 100
   dim_f: 80
   batch_size: 256
-  num_epochs: 20
-  learning_rate: 2.0e-5
-  l1_lambda: 1.0e-5
-  freeze_after_pretrain: true
-  save_every: 5
 
 latent_cache:
   dtype: float32
@@ -61,8 +56,19 @@ eval:
   latent_swd_projections: 128
   latent_swd_bins: 256
 
+pyomt:
+  ot_max_iter: 20000
+  ot_bat_size_n: 1000
+  ot_num_bat: 20
+  ot_num_gen_x: 20000
+  ot_max_gen_samples: 1000
+
 seeds: [0, 1, 2]
 
 paths:
+  # In Colab, point this to your mounted Drive (or local Colab FS) checkpoint path.
+  pretrained_ae_checkpoint: /content/drive/MyDrive/AE_OT/pretrained/Epoch_0000_sim_autoencoder_pretrained.pth
+  # Optional: precomputed features.pt path for pyOMT/demo2. Leave empty to compute features in Colab.
+  precomputed_feature_file: ""
   output_root: /Volumes/Files/AE_OT/experiments/latent_fm_ot_v2/runs/celeba64_fair
   python_bin: python

@@ -9,13 +9,13 @@ import torch
 from torchvision import datasets
 
 from common import (
-    ae_dir,
     build_autoencoder_from_config,
     ensure_dir,
     image_transform,
     latent_file_paths,
     load_config,
     resolve_device,
+    resolve_pretrained_ae_checkpoint,
     save_json,
     set_seed,
 )
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         "--ae_checkpoint",
         default="",
         type=str,
-        help="Optional explicit checkpoint path. Defaults to ae_best.pt then ae_final.pt.",
+        help="Optional explicit pretrained checkpoint path. Defaults to config paths.pretrained_ae_checkpoint.",
     )
     return parser.parse_args()
 
@@ -77,21 +77,7 @@ def main() -> None:
 
     output_root = Path(cfg["paths"]["output_root"]).expanduser().resolve()
     seed_root = output_root / f"seed_{args.seed}"
-    ae_root = ae_dir(seed_root)
-    ensure_dir(ae_root)
-
-    checkpoint_path = Path(args.ae_checkpoint).resolve() if args.ae_checkpoint else None
-    if checkpoint_path is None:
-        candidate_best = ae_root / "ae_best.pt"
-        candidate_final = ae_root / "ae_final.pt"
-        if candidate_best.exists():
-            checkpoint_path = candidate_best
-        elif candidate_final.exists():
-            checkpoint_path = candidate_final
-        else:
-            raise FileNotFoundError(
-                f"No AE checkpoint found under {ae_root}. Expected ae_best.pt or ae_final.pt."
-            )
+    checkpoint_path = resolve_pretrained_ae_checkpoint(cfg=cfg, explicit=args.ae_checkpoint)
 
     model = build_autoencoder_from_config(cfg).to(device)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))

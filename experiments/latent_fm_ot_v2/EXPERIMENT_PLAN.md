@@ -6,7 +6,7 @@ Build a clean experiment track where Flow Matching (FM) and AE-OT use one shared
 ## Mathematical Formulation
 
 ### Shared latent empirical target
-Given training images `x_i`, train one AE and freeze it:
+Given training images `x_i`, load one pre-trained AE and keep it frozen:
 - `z_i = E(x_i)`
 - `nu = (1/n) * sum_i delta(z_i)`
 
@@ -66,12 +66,12 @@ Sample latent points via the learned assignment/interpolation rule, then decode 
 - Same seeds.
 
 ## Training Pipeline
-1. Train shared AE once per seed (`train_shared_ae.py`).
-2. Freeze AE and encode train/test latents (`encode_latents.py`).
+1. Load pre-trained AE checkpoint from config path `paths.pretrained_ae_checkpoint`.
+2. Encode train/test latents with frozen AE (`encode_latents.py`).
 3. Train latent OT with adaptive MC budget and save schedule/checkpoints (`train_latent_ot.py`).
 4. Train latent FM with mirrored `N_k` schedule from OT (`train_latent_fm.py`).
 5. Sample latent generations for FM/OT checkpoints (`sample_fm.py`, `sample_ot.py`).
-6. Decode latent generations (`decode_samples.py`).
+6. Decode latent generations with the same pre-trained decoder (`decode_samples.py`).
 7. Evaluate image + latent metrics and aggregate (`evaluate.py`, `run_compare.py`).
 
 ## Budget Synchronization Rule
@@ -130,12 +130,21 @@ python experiments/latent_fm_ot_v2/run_compare.py \
 Run per stage (manual):
 
 ```bash
-python experiments/latent_fm_ot_v2/train_shared_ae.py --config ... --seed 0
-python experiments/latent_fm_ot_v2/encode_latents.py --config ... --seed 0
+python experiments/latent_fm_ot_v2/encode_latents.py --config ... --seed 0 --ae_checkpoint /content/drive/MyDrive/...pth
 python experiments/latent_fm_ot_v2/train_latent_ot.py --config ... --seed 0
 python experiments/latent_fm_ot_v2/train_latent_fm.py --config ... --seed 0 --ot_schedule_json <.../ot_schedule.json>
 python experiments/latent_fm_ot_v2/sample_ot.py --config ... --seed 0 --h_checkpoint <.../h_step_*.pt>
 python experiments/latent_fm_ot_v2/sample_fm.py --config ... --seed 0 --fm_checkpoint <.../model_step_*.pt>
-python experiments/latent_fm_ot_v2/decode_samples.py --config ... --seed 0 --latent_file <...>.pt --output_dir <...>
+python experiments/latent_fm_ot_v2/decode_samples.py --config ... --seed 0 --ae_checkpoint /content/drive/MyDrive/...pth --latent_file <...>.pt --output_dir <...>
 python experiments/latent_fm_ot_v2/evaluate.py --config ... --seed 0 --real_dir <...> --fm_dir <...> --ot_dir <...>
+```
+
+Run pyOMT OT directly with pre-trained AE (Colab-oriented):
+
+```bash
+python experiments/latent_fm_ot_v2/run_pyomt_pretrained_ot.py \
+  --config experiments/latent_fm_ot_v2/configs/celeba64_fair.yaml \
+  --seed 0 \
+  --ae_checkpoint /content/drive/MyDrive/AE_OT/pretrained/Epoch_0000_sim_autoencoder_pretrained.pth \
+  --extract_feature_if_missing
 ```

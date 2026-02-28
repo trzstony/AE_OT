@@ -130,15 +130,21 @@ def build_autoencoder_from_config(cfg: Dict[str, Any]) -> nn.Module:
     )
 
 
-def save_ae_checkpoint(model: nn.Module, path: Path) -> None:
-    ensure_dir(path.parent)
-    torch.save(model.state_dict(), path)
+def resolve_pretrained_ae_checkpoint(cfg: Dict[str, Any], explicit: str = "") -> Path:
+    if explicit:
+        ckpt = Path(explicit).expanduser().resolve()
+    else:
+        raw = str(cfg.get("paths", {}).get("pretrained_ae_checkpoint", "")).strip()
+        if not raw:
+            raise ValueError(
+                "Missing pretrained AE checkpoint. Set paths.pretrained_ae_checkpoint in config "
+                "or pass --ae_checkpoint."
+            )
+        ckpt = Path(raw).expanduser().resolve()
 
-
-def load_ae_checkpoint(model: nn.Module, path: Path, device: torch.device) -> nn.Module:
-    state = torch.load(path, map_location=device)
-    model.load_state_dict(state)
-    return model
+    if not ckpt.exists():
+        raise FileNotFoundError(f"Pretrained AE checkpoint not found: {ckpt}")
+    return ckpt
 
 
 def to_uint8_image(x: torch.Tensor) -> torch.Tensor:
@@ -149,10 +155,6 @@ def to_uint8_image(x: torch.Tensor) -> torch.Tensor:
 def latent_file_paths(seed_root: Path) -> Tuple[Path, Path]:
     latent_dir = seed_root / "latent_cache"
     return latent_dir / "train_latents.pt", latent_dir / "test_latents.pt"
-
-
-def ae_dir(seed_root: Path) -> Path:
-    return seed_root / "ae"
 
 
 def fm_dir(seed_root: Path) -> Path:

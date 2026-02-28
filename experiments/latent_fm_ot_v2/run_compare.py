@@ -9,13 +9,19 @@ import subprocess
 import sys
 from typing import Dict, List
 
-from common import ensure_dir, load_config, save_jsonl, write_summary_csv
+from common import ensure_dir, load_config, resolve_pretrained_ae_checkpoint, save_jsonl, write_summary_csv
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run end-to-end shared-latent FM vs AE-OT comparison.")
     parser.add_argument("--config", required=True, type=str)
     parser.add_argument("--device", default="", type=str)
+    parser.add_argument(
+        "--ae_checkpoint",
+        default="",
+        type=str,
+        help="Optional explicit pretrained AE checkpoint override.",
+    )
     parser.add_argument("--seeds", default="", type=str, help="Optional comma-separated seed override.")
     parser.add_argument("--reuse_existing", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
@@ -57,6 +63,15 @@ def _flatten_method_row(
 def main() -> None:
     args = parse_args()
     cfg = load_config(Path(args.config).resolve())
+    try:
+        pretrained_ae_ckpt = resolve_pretrained_ae_checkpoint(cfg=cfg, explicit=args.ae_checkpoint)
+    except (ValueError, FileNotFoundError):
+        if not args.dry_run:
+            raise
+        raw = args.ae_checkpoint or str(cfg.get("paths", {}).get("pretrained_ae_checkpoint", ""))
+        if not raw:
+            raise
+        pretrained_ae_ckpt = Path(raw).expanduser().resolve()
 
     python_bin = str(cfg.get("paths", {}).get("python_bin", sys.executable))
     output_root = Path(cfg["paths"]["output_root"]).expanduser().resolve()
@@ -74,22 +89,6 @@ def main() -> None:
         seed_root = output_root / f"seed_{seed}"
         ensure_dir(seed_root)
 
-        ae_summary = seed_root / "ae" / "summary.json"
-        if (not args.reuse_existing) or (not ae_summary.exists()):
-            cmd = [
-                python_bin,
-                "experiments/latent_fm_ot_v2/train_shared_ae.py",
-                "--config",
-                args.config,
-                "--seed",
-                str(seed),
-            ]
-            if args.device:
-                cmd += ["--device", args.device]
-            if args.reuse_existing:
-                cmd.append("--resume")
-            _run(cmd, dry_run=args.dry_run)
-
         latent_summary = seed_root / "latent_cache" / "summary.json"
         if (not args.reuse_existing) or (not latent_summary.exists()):
             cmd = [
@@ -99,6 +98,8 @@ def main() -> None:
                 args.config,
                 "--seed",
                 str(seed),
+                "--ae_checkpoint",
+                str(pretrained_ae_ckpt),
             ]
             if args.device:
                 cmd += ["--device", args.device]
@@ -217,6 +218,8 @@ def main() -> None:
                     str(fm_latent),
                     "--output_dir",
                     str(fm_decoded),
+                    "--ae_checkpoint",
+                    str(pretrained_ae_ckpt),
                 ]
                 if args.device:
                     cmd += ["--device", args.device]
@@ -234,6 +237,8 @@ def main() -> None:
                     str(ot_latent),
                     "--output_dir",
                     str(ot_decoded),
+                    "--ae_checkpoint",
+                    str(pretrained_ae_ckpt),
                 ]
                 if args.device:
                     cmd += ["--device", args.device]
@@ -261,6 +266,8 @@ def main() -> None:
                     str(ot_latent),
                     "--output_json",
                     str(metric_json),
+                    "--ae_checkpoint",
+                    str(pretrained_ae_ckpt),
                 ]
                 if args.device:
                     cmd += ["--device", args.device]

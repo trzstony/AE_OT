@@ -15,13 +15,13 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import ToTensor
 
 from common import (
-    ae_dir,
     build_autoencoder_from_config,
     image_transform,
     imagefolder_loader,
     load_config,
     psnr_from_mse,
     resolve_device,
+    resolve_pretrained_ae_checkpoint,
     save_json,
     set_seed,
     to_uint8_image,
@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fm_latent", required=True, type=str)
     parser.add_argument("--ot_latent", required=True, type=str)
     parser.add_argument("--output_json", required=True, type=str)
+    parser.add_argument("--ae_checkpoint", default="", type=str)
     parser.add_argument("--device", default="", type=str)
     return parser.parse_args()
 
@@ -236,18 +237,20 @@ def _compute_latent_metrics(real_latent: Path, fake_latent: Path, max_count: int
     }
 
 
-def _compute_ae_reconstruction_metrics(cfg: Dict, seed_root: Path, device: torch.device) -> Dict[str, float | None | str]:
-    ae_root = ae_dir(seed_root)
-    ckpt = ae_root / "ae_best.pt"
-    if not ckpt.exists():
-        ckpt = ae_root / "ae_final.pt"
-    if not ckpt.exists():
+def _compute_ae_reconstruction_metrics(
+    cfg: Dict,
+    device: torch.device,
+    ae_checkpoint_override: str = "",
+) -> Dict[str, float | None | str]:
+    try:
+        ckpt = resolve_pretrained_ae_checkpoint(cfg=cfg, explicit=ae_checkpoint_override)
+    except (ValueError, FileNotFoundError):
         return {
             "ae_test_mse": None,
             "ae_test_psnr": None,
             "ae_test_lpips": None,
             "ae_test_ssim": None,
-            "status": "missing_ae_checkpoint",
+            "status": "missing_pretrained_ae_checkpoint",
         }
 
     model = build_autoencoder_from_config(cfg).to(device)
@@ -381,9 +384,6 @@ def main() -> None:
     set_seed(args.seed)
     device = resolve_device(args.device or None)
 
-    output_root = Path(cfg["paths"]["output_root"]).expanduser().resolve()
-    seed_root = output_root / f"seed_{args.seed}"
-
     real_dir = Path(args.real_dir).resolve()
     fm_dir = Path(args.fm_dir).resolve()
     ot_dir = Path(args.ot_dir).resolve()
@@ -434,7 +434,11 @@ def main() -> None:
         n_proj=n_proj,
     )
 
-    ae_rec = _compute_ae_reconstruction_metrics(cfg=cfg, seed_root=seed_root, device=device)
+    ae_rec = _compute_ae_reconstruction_metrics(
+        cfg=cfg,
+        device=device,
+        ae_checkpoint_override=args.ae_checkpoint,
+    )
 
     result = {
         "seed": args.seed,
